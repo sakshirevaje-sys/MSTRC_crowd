@@ -1,193 +1,313 @@
-# app.py
-import datetime
-import joblib
-import numpy as np
-import pandas as pd
 import streamlit as st
+from datetime import time
+import time as t
+import random
 
-# ----------------------
-# Config
-# ----------------------
-MODEL_PATH = "models/crowd_rf_model.pkl"
+# ----------------------------
+# Page config
+# ----------------------------
+st.set_page_config(
+    page_title="MSRTC Crowd Predictor",
+    page_icon="🚌",
+    layout="centered",
+    initial_sidebar_state="collapsed",
+)
 
-# Maharashtra 2026 holidays (same set as generator) [web:10]
-MAH_HOLIDAYS_2026 = {
-    datetime.date(2026, 1, 26),
-    datetime.date(2026, 3, 19),
-    datetime.date(2026, 3, 21),
-}
+# ----------------------------
+# Dark + gradient + glassmorphism CSS
+# ----------------------------
+st.markdown(
+    """
+    <style>
+      /* App background */
+      .stApp {
+        background: radial-gradient(1200px circle at 10% 10%, rgba(99,102,241,0.25), transparent 50%),
+                    radial-gradient(900px circle at 90% 20%, rgba(16,185,129,0.18), transparent 55%),
+                    radial-gradient(1000px circle at 30% 90%, rgba(236,72,153,0.16), transparent 55%),
+                    linear-gradient(180deg, #0b1220 0%, #070b14 100%);
+        color: #e5e7eb;
+      }
 
-FESTIVAL_DATES = {
-    datetime.date(2025, 9, 7),
-    datetime.date(2025, 9, 8),
-    datetime.date(2025, 9, 9),
-    datetime.date(2025, 10, 29),
-    datetime.date(2025, 10, 30),
-    datetime.date(2025, 7, 10),
-    datetime.date(2025, 7, 11),
-}
+      /* Reduce top padding a bit */
+      .block-container { padding-top: 2.0rem; padding-bottom: 3rem; max-width: 780px; }
 
-TIME_SLOTS = [6, 7, 8, 9, 12, 13, 14, 17, 18, 19]
+      /* Hide Streamlit footer/menu */
+      #MainMenu {visibility: hidden;}
+      footer {visibility: hidden;}
+      header {visibility: hidden;}
 
-def is_holiday(date_obj):
-    return 1 if date_obj in MAH_HOLIDAYS_2026 else 0
+      /* Glass card */
+      .glass {
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.10);
+        box-shadow: 0 20px 50px rgba(0,0,0,0.35);
+        border-radius: 18px;
+        padding: 18px 18px;
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+      }
 
-def is_festival(date_obj):
-    return 1 if date_obj in FESTIVAL_DATES else 0
+      .title {
+        font-size: 2.05rem;
+        font-weight: 750;
+        letter-spacing: 0.2px;
+        margin: 0;
+        line-height: 1.2;
+      }
+      .subtitle {
+        margin-top: 0.4rem;
+        color: rgba(229,231,235,0.75);
+        font-size: 1.02rem;
+      }
 
-def load_model():
-    return joblib.load(MODEL_PATH)
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-radius: 999px;
+        border: 1px solid rgba(255,255,255,0.10);
+        background: rgba(255,255,255,0.05);
+        color: rgba(229,231,235,0.9);
+        font-size: 0.95rem;
+      }
 
-def crowd_to_marathi(label):
-    if label == "High":
-        return "जास्त"
-    elif label == "Medium":
-        return "मध्यम"
+      .muted {
+        color: rgba(229,231,235,0.65);
+        font-size: 0.92rem;
+      }
+
+      /* Result badges */
+      .badge {
+        display:inline-flex;
+        align-items:center;
+        gap:10px;
+        padding: 10px 12px;
+        border-radius: 14px;
+        border: 1px solid rgba(255,255,255,0.10);
+        background: rgba(255,255,255,0.05);
+        margin-top: 6px;
+      }
+      .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        display: inline-block;
+        box-shadow: 0 0 0 4px rgba(255,255,255,0.03);
+      }
+
+      .high { color: #fecaca; }
+      .med  { color: #fde68a; }
+      .low  { color: #bbf7d0; }
+
+      .dot-high { background: #ef4444; }
+      .dot-med  { background: #f59e0b; }
+      .dot-low  { background: #22c55e; }
+
+      /* Progress bar container feel */
+      .barwrap {
+        margin-top: 10px;
+        padding: 12px;
+        border-radius: 16px;
+        border: 1px solid rgba(255,255,255,0.10);
+        background: rgba(255,255,255,0.04);
+      }
+
+      /* Button styling */
+      div.stButton > button {
+        width: 100%;
+        border-radius: 14px;
+        border: 1px solid rgba(255,255,255,0.12);
+        background: linear-gradient(135deg, rgba(99,102,241,0.70), rgba(236,72,153,0.55));
+        color: white;
+        padding: 0.9rem 1rem;
+        font-weight: 650;
+        transition: transform 120ms ease, box-shadow 120ms ease, filter 120ms ease;
+        box-shadow: 0 16px 40px rgba(0,0,0,0.35);
+      }
+      div.stButton > button:hover {
+        transform: translateY(-1px) scale(1.01);
+        filter: brightness(1.05);
+        box-shadow: 0 18px 46px rgba(0,0,0,0.45);
+      }
+
+      /* Selectbox + input spacing */
+      .stSelectbox, .stTimeInput { margin-bottom: 0.35rem; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ----------------------------
+# Header
+# ----------------------------
+st.markdown(
+    """
+    <div class="glass">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:14px;">
+        <div>
+          <p class="title">MSRTC Crowd Predictor</p>
+          <p class="subtitle">Plan your journey smarter</p>
+          <div style="margin-top:10px;">
+            <span class="chip">🚌 MSRTC • Crowd Forecast</span>
+            <span class="chip">🌙 Dark • Glass UI</span>
+          </div>
+        </div>
+        <div style="font-size:3.2rem; opacity:0.9; line-height:1;">🚌</div>
+      </div>
+      <div style="margin-top:10px;" class="muted">
+        Tip: predictions may vary by route, day, and time. Choose carefully.
+      </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.write("")
+
+# ----------------------------
+# Inputs
+# ----------------------------
+# Replace these with your real stops if you have a list
+SOURCES = ["Solapur", "Pune", "Mumbai"]
+DESTS = ["Pune", "Mumbai", "Solapur"]
+
+DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+with st.container():
+    st.markdown('<div class="glass">', unsafe_allow_html=True)
+    st.subheader("Trip details")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        source = st.selectbox("Source", SOURCES, index=0)
+    with c2:
+        destination = st.selectbox("Destination", DESTS, index=1)
+
+    c3, c4 = st.columns(2)
+    with c3:
+        day = st.selectbox("Day", DAYS, index=0)
+    with c4:
+        # Time picker: choose time of day
+        journey_time = st.time_input("Time", value=time(9, 0))
+
+    st.caption("Info: Avoid selecting the same Source & Destination.")
+    predict_clicked = st.button("Predict Crowd")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# ----------------------------
+# Prediction integration (stub)
+# Replace this with your real model/function.
+# ----------------------------
+def predict_crowd(source: str, destination: str, day: str, journey_time: time):
+    """
+    Return: (level: 'High'|'Medium'|'Low', occupancy_percent: int, best_time_text: str|None)
+    Replace this stub with your real model.
+    """
+    # Simple heuristic demo:
+    hour = journey_time.hour
+    base = 40
+
+    if day in ["Saturday", "Sunday"]:
+        base += 20
+    if hour in [8, 9, 10, 18, 19, 20]:
+        base += 30
+    if source == "Mumbai" or destination == "Mumbai":
+        base += 10
+
+    occupancy = min(98, max(5, base + random.randint(-8, 10)))
+
+    if occupancy >= 75:
+        level = "High"
+        best_time = "Try 11:00 AM – 3:00 PM for lighter crowd."
+    elif occupancy >= 45:
+        level = "Medium"
+        best_time = "Try 10:30 AM – 12:00 PM for a slightly better chance."
     else:
-        return "कमी"
+        level = "Low"
+        best_time = "Good time to travel — crowd is usually low."
+    return level, occupancy, best_time
 
-def main():
-    st.set_page_config(page_title="MSRTC Crowd Predictor", layout="centered")
 
-    st.title("🚌 MSRTC Solapur Route Crowd Predictor")
-    st.write("**गर्दीचा अंदाज / Crowd Prediction for MSRTC routes**")
+def marathi_line(level: str, occupancy: int):
+    # Marathi digits (optional nice touch)
+    trans = str.maketrans("0123456789", "०१२३४५६७८९")
+    occ_mr = str(occupancy).translate(trans)
 
-    model = load_model()
+    if level == "High":
+        return f"जास्त गर्दी – {occ_mr}% सीट भरलेली"
+    if level == "Medium":
+        return f"मध्यम गर्दी – {occ_mr}% सीट भरलेली"
+    return f"कमी गर्दी – {occ_mr}% सीट भरलेली"
 
-    # Sidebar: info
-    st.sidebar.header("Project Info")
-    st.sidebar.markdown(
-        """
-        **Mini Project**: Bus Route Crowd Predictor for MSRTC  
-        - Routes around **Solapur**  
-        - Uses **Random Forest** classification  
-        - Considers **festival & holiday factors**
-        """
-    )
 
-    # Inputs
-    st.subheader("1. Select Route and Time")
+def level_style(level: str):
+    if level == "High":
+        return "high", "dot-high", "🚨"
+    if level == "Medium":
+        return "med", "dot-med", "⚠️"
+    return "low", "dot-low", "✅"
 
-    routes = [
-        "Solapur-Pune",
-        "Solapur-Kolhapur",
-        "Solapur-Akkalkot",
-        "Solapur-Pandharpur",
-        "Solapur-Latur",
-        "Solapur-Sangli",
-    ]
 
-    route = st.selectbox("Route", routes)
+# ----------------------------
+# Output
+# ----------------------------
+if predict_clicked:
+    if source == destination:
+        st.error("Source and Destination cannot be the same.")
+    else:
+        # Loading animation
+        with st.spinner("Predicting crowd…"):
+            t.sleep(1.1)  # simulate compute time; remove for real prediction
 
-    today = datetime.date.today()
-    date_input = st.date_input(
-        "Date", value=today, min_value=datetime.date(2025, 4, 1), max_value=datetime.date(2026, 3, 31)
-    )
+            level, occupancy, best_time = predict_crowd(source, destination, day, journey_time)
 
-    hour = st.selectbox(
-        "Departure hour (24‑hour)", TIME_SLOTS, index=TIME_SLOTS.index(8)
-    )
+        color_cls, dot_cls, icon = level_style(level)
+        suggestion_en = {
+            "High": "Consider traveling earlier/later to avoid peak rush.",
+            "Medium": "You may get seats, but expect some crowd.",
+            "Low": "Comfortable journey expected — good time to travel.",
+        }[level]
 
-    weather = st.selectbox("Weather", ["Clear", "Cloudy", "Rain", "Heavy Rain"])
+        # Result card (fade-ish effect: Streamlit renders instantly, but we keep it clean)
+        st.write("")
+        st.markdown('<div class="glass">', unsafe_allow_html=True)
+        st.subheader("Prediction")
 
-    # Prepare features
-    day_of_week = date_input.weekday()
-    weekend = 1 if day_of_week >= 5 else 0
-    holiday_flag = is_holiday(date_input)
-    festival_flag = is_festival(date_input)
-
-    # Distance and stops mapping (same as generator)
-    route_info = {
-        "Solapur-Pune": (260, 10),
-        "Solapur-Kolhapur": (230, 9),
-        "Solapur-Akkalkot": (40, 5),
-        "Solapur-Pandharpur": (70, 6),
-        "Solapur-Latur": (110, 7),
-        "Solapur-Sangli": (210, 8),
-    }
-    distance_km, num_stops = route_info[route]
-
-    input_df = pd.DataFrame(
-        [
-            {
-                "route": route,
-                "day_of_week": day_of_week,
-                "hour": hour,
-                "is_weekend": weekend,
-                "is_holiday": holiday_flag,
-                "is_festival": festival_flag,
-                "distance_km": distance_km,
-                "num_stops": num_stops,
-                "weather": weather,
-            }
-        ]
-    )
-
-    st.subheader("2. Prediction")
-
-    if st.button("Predict Crowd"):
-        pred = model.predict(input_df)[0]
-        probs = model.predict_proba(input_df)[0]
-        classes = model.classes_
-        prob_map = dict(zip(classes, probs))
-        confidence = prob_map.get(pred, 0) * 100
-
-        marathi_label = crowd_to_marathi(pred)
-
-        st.success(
-            f"**Predicted crowd level:** {pred}  "
-            f"(**गर्दीचा अंदाज:** {marathi_label})  "
-            f"— Confidence: ~{confidence:.1f}%"
+        st.markdown(
+            f"""
+            <div class="badge">
+              <span class="dot {dot_cls}"></span>
+              <div>
+                <div class="{color_cls}" style="font-weight:800; font-size:1.15rem;">
+                  {icon} {level} Crowd – {occupancy}% seats full
+                </div>
+                <div class="muted">{marathi_line(level, occupancy)}</div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
-        # Simple explanation
-        reason_parts = []
-        if weekend:
-            reason_parts.append("weekend")
-        if holiday_flag:
-            reason_parts.append("Maharashtra holiday")
-        if festival_flag:
-            reason_parts.append("festival season")
-        if "Pandharpur" in route or "Akkalkot" in route:
-            reason_parts.append("pilgrimage route")
+        st.markdown('<div class="barwrap">', unsafe_allow_html=True)
+        st.markdown("**Occupancy**")
+        st.progress(occupancy / 100.0)
+        st.caption("Higher percentage means more crowd.")
+        st.markdown("</div>", unsafe_allow_html=True)
 
-        if reason_parts:
-            st.info(
-                "Reasoning hint: Model is influenced by **{}**, "
-                "along with hour and route.".format(", ".join(reason_parts))
-            )
-        else:
-            st.info(
-                "Reasoning hint: Model mainly considers **hour, route, and weekday pattern**."
-            )
+        # Suggestion
+        st.markdown("**Suggestion**")
+        st.write(suggestion_en)
+        st.write("**सूचना (Marathi):**")
+        mr_sugg = {
+            "High": "पीक वेळ टाळण्यासाठी लवकर/उशिरा प्रवास करण्याचा विचार करा.",
+            "Medium": "बस मध्ये गर्दी असू शकते, पण सीट मिळण्याची शक्यता आहे.",
+            "Low": "प्रवास आरामदायी होण्याची शक्यता जास्त आहे.",
+        }[level]
+        st.write(mr_sugg)
 
-        # Extra: crowd across the day for same route & date
-        st.subheader("3. Crowd across the day (same route & date)")
-        rows = []
-        for h in TIME_SLOTS:
-            row_df = input_df.copy()
-            row_df["hour"] = h
-            p = model.predict(row_df)[0]
-            rows.append({"hour": h, "predicted_crowd": p})
-        chart_df = pd.DataFrame(rows)
+        # Optional badge: Best time suggestion
+        st.markdown("---")
+        st.markdown(f"**Best Time Suggestion:** {best_time}")
 
-        # Map label to order for plotting
-        level_order = {"Low": 0, "Medium": 1, "High": 2}
-        chart_df["level_num"] = chart_df["predicted_crowd"].map(level_order)
-
-        st.bar_chart(
-            chart_df.set_index("hour")["level_num"],
-            height=300,
-        )
-        st.caption(
-            "0 = Low, 1 = Medium, 2 = High. "
-            "This shows how crowded the route is across different time slots."
-        )
-
-    st.markdown("---")
-    st.markdown(
-        "**Future Scope:** Connect with live MSRTC GPS & ticketing API to use real passenger counts."
-    )
-
-if __name__ == "__main__":
-    main()
+        st.markdown("</div>", unsafe_allow_html=True)
